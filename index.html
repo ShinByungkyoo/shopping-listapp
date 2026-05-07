@@ -59,6 +59,7 @@
   }
   #add-btn:hover { background: #3182ce; }
   #add-btn:active { background: #2b6cb0; }
+  #add-btn:disabled { background: #cbd5e0; cursor: default; }
   .stats {
     display: flex;
     justify-content: space-between;
@@ -122,6 +123,14 @@
     padding: 32px 0;
     font-size: 0.95rem;
   }
+  .status {
+    text-align: center;
+    color: #a0aec0;
+    padding: 8px 0;
+    font-size: 0.85rem;
+    min-height: 1.4em;
+  }
+  .status.error { color: #e53e3e; }
 </style>
 </head>
 <body>
@@ -140,39 +149,104 @@
   </div>
 
   <ul id="list"></ul>
-  <p id="empty-state" class="empty">아직 추가된 항목이 없습니다</p>
+  <p id="empty-state" class="empty" hidden>아직 추가된 항목이 없습니다</p>
+  <p id="status" class="status">불러오는 중...</p>
 </div>
 
-<script>
-  const STORAGE_KEY = "shopping_list_items_v1";
+<script type="module">
+  import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+  const SUPABASE_URL = "https://pihdesvppnzbrdizjuot.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_BlR1vuSlnOl3deHcx3MK1w_mRu9Ua43";
+  const TABLE = "shopping_items";
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const form = document.getElementById("add-form");
   const input = document.getElementById("item-input");
+  const addBtn = document.getElementById("add-btn");
   const listEl = document.getElementById("list");
   const emptyEl = document.getElementById("empty-state");
   const countText = document.getElementById("count-text");
   const clearBtn = document.getElementById("clear-checked");
+  const statusEl = document.getElementById("status");
 
-  let items = load();
+  let items = [];
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return [];
-      // Migrate older numeric IDs to UUID strings so dataset.id comparisons hold.
-      return JSON.parse(raw).map(item => ({
-        ...item,
-        id: typeof item.id === "string" ? item.id : crypto.randomUUID(),
-      }));
-    } catch {
-      return [];
+  function setStatus(msg, isError = false) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle("error", isError);
+    statusEl.hidden = !msg;
+  }
+
+  async function loadItems() {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("id, text, done, created_at")
+      .order("created_at", { ascending: true });
+    if (error) {
+      setStatus(`불러오기 실패: ${error.message}`, true);
+      return;
+    }
+    items = data ?? [];
+    setStatus("");
+    render();
+  }
+
+  async function addItem(text) {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .insert({ text, done: false })
+      .select()
+      .single();
+    if (error) {
+      setStatus(`추가 실패: ${error.message}`, true);
+      return;
+    }
+    items.push(data);
+    render();
+  }
+
+  async function toggleItem(id, done) {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    const prev = item.done;
+    item.done = done;
+    render();
+    const { error } = await supabase
+      .from(TABLE)
+      .update({ done })
+      .eq("id", id);
+    if (error) {
+      item.done = prev;
+      setStatus(`업데이트 실패: ${error.message}`, true);
+      render();
     }
   }
 
-  function save() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      // quota exceeded / private-mode block — keep in-memory state, drop persistence
+  async function deleteItem(id) {
+    const prev = items;
+    items = items.filter(i => i.id !== id);
+    render();
+    const { error } = await supabase.from(TABLE).delete().eq("id", id);
+    if (error) {
+      items = prev;
+      setStatus(`삭제 실패: ${error.message}`, true);
+      render();
+    }
+  }
+
+  async function clearChecked() {
+    const checkedIds = items.filter(i => i.done).map(i => i.id);
+    if (checkedIds.length === 0) return;
+    const prev = items;
+    items = items.filter(i => !i.done);
+    render();
+    const { error } = await supabase.from(TABLE).delete().in("id", checkedIds);
+    if (error) {
+      items = prev;
+      setStatus(`삭제 실패: ${error.message}`, true);
+      render();
     }
   }
 
@@ -210,14 +284,14 @@
     emptyEl.hidden = items.length > 0;
   }
 
-  form.addEventListener("submit", e => {
+  form.addEventListener("submit", async e => {
     e.preventDefault();
     const text = input.value.trim();
     if (!text) return;
-    items.push({ id: crypto.randomUUID(), text, done: false });
     input.value = "";
-    save();
-    render();
+    addBtn.disabled = true;
+    await addItem(text);
+    addBtn.disabled = false;
     input.focus();
   });
 
@@ -225,28 +299,18 @@
   listEl.addEventListener("change", e => {
     if (e.target.dataset.action !== "toggle") return;
     const id = e.target.closest("li")?.dataset.id;
-    const item = items.find(i => i.id === id);
-    if (!item) return;
-    item.done = e.target.checked;
-    save();
-    render();
+    if (id) toggleItem(id, e.target.checked);
   });
 
   listEl.addEventListener("click", e => {
     if (e.target.dataset.action !== "delete") return;
     const id = e.target.closest("li")?.dataset.id;
-    items = items.filter(i => i.id !== id);
-    save();
-    render();
+    if (id) deleteItem(id);
   });
 
-  clearBtn.addEventListener("click", () => {
-    items = items.filter(i => !i.done);
-    save();
-    render();
-  });
+  clearBtn.addEventListener("click", clearChecked);
 
-  render();
+  loadItems();
 </script>
 </body>
 </html>
