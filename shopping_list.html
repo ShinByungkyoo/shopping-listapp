@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>쇼핑 리스트</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 40px 16px;
+  }
+  .app {
+    background: #fff;
+    width: 100%;
+    max-width: 480px;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    padding: 28px;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 4px;
+    color: #2d3748;
+  }
+  .subtitle {
+    color: #718096;
+    font-size: 0.9rem;
+    margin-bottom: 20px;
+  }
+  .input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  #item-input {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 1rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #item-input:focus { border-color: #4299e1; }
+  #add-btn {
+    padding: 0 20px;
+    font-size: 1rem;
+    background: #4299e1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #add-btn:hover { background: #3182ce; }
+  #add-btn:active { background: #2b6cb0; }
+  .stats {
+    display: flex;
+    justify-content: space-between;
+    color: #718096;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    padding: 0 4px;
+  }
+  #clear-checked {
+    background: none;
+    border: none;
+    color: #e53e3e;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0;
+  }
+  #clear-checked:hover { text-decoration: underline; }
+  #clear-checked:disabled { color: #cbd5e0; cursor: default; text-decoration: none; }
+  ul#list {
+    list-style: none;
+  }
+  li {
+    display: flex;
+    align-items: center;
+    padding: 12px 4px;
+    border-bottom: 1px solid #edf2f7;
+    gap: 12px;
+  }
+  li:last-child { border-bottom: none; }
+  li input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: #4299e1;
+    flex-shrink: 0;
+  }
+  li .text {
+    flex: 1;
+    font-size: 1rem;
+    color: #2d3748;
+    word-break: break-word;
+  }
+  li.done .text {
+    text-decoration: line-through;
+    color: #a0aec0;
+  }
+  li .delete {
+    background: none;
+    border: none;
+    color: #cbd5e0;
+    cursor: pointer;
+    font-size: 1.3rem;
+    padding: 4px 8px;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+  li .delete:hover { color: #e53e3e; }
+  .empty {
+    text-align: center;
+    color: #a0aec0;
+    padding: 32px 0;
+    font-size: 0.95rem;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🛒 쇼핑 리스트</h1>
+  <p class="subtitle">사야 할 것들을 잊지 마세요</p>
+
+  <form id="add-form" class="input-row">
+    <input id="item-input" type="text" placeholder="추가할 아이템 입력..." maxlength="100" autofocus required>
+    <button type="submit" id="add-btn">추가</button>
+  </form>
+
+  <div class="stats">
+    <span id="count-text">0개 항목</span>
+    <button type="button" id="clear-checked" disabled>체크된 항목 삭제</button>
+  </div>
+
+  <ul id="list"></ul>
+  <p id="empty-state" class="empty">아직 추가된 항목이 없습니다</p>
+</div>
+
+<script>
+  const STORAGE_KEY = "shopping_list_items_v1";
+  const form = document.getElementById("add-form");
+  const input = document.getElementById("item-input");
+  const listEl = document.getElementById("list");
+  const emptyEl = document.getElementById("empty-state");
+  const countText = document.getElementById("count-text");
+  const clearBtn = document.getElementById("clear-checked");
+
+  let items = load();
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return [];
+      // Migrate older numeric IDs to UUID strings so dataset.id comparisons hold.
+      return JSON.parse(raw).map(item => ({
+        ...item,
+        id: typeof item.id === "string" ? item.id : crypto.randomUUID(),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch {
+      // quota exceeded / private-mode block — keep in-memory state, drop persistence
+    }
+  }
+
+  function render() {
+    listEl.replaceChildren();
+
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.dataset.id = item.id;
+      if (item.done) li.classList.add("done");
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = item.done;
+      checkbox.dataset.action = "toggle";
+
+      const text = document.createElement("span");
+      text.className = "text";
+      text.textContent = item.text;
+
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "delete";
+      del.textContent = "×";
+      del.dataset.action = "delete";
+      del.setAttribute("aria-label", `${item.text} 삭제`);
+
+      li.append(checkbox, text, del);
+      listEl.append(li);
+    }
+
+    const checkedCount = items.filter(i => i.done).length;
+    countText.textContent = `${items.length}개 항목 · ${checkedCount}개 완료`;
+    clearBtn.disabled = checkedCount === 0;
+    emptyEl.hidden = items.length > 0;
+  }
+
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    items.push({ id: crypto.randomUUID(), text, done: false });
+    input.value = "";
+    save();
+    render();
+    input.focus();
+  });
+
+  // Delegated handlers — one listener per event type for the whole list.
+  listEl.addEventListener("change", e => {
+    if (e.target.dataset.action !== "toggle") return;
+    const id = e.target.closest("li")?.dataset.id;
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    item.done = e.target.checked;
+    save();
+    render();
+  });
+
+  listEl.addEventListener("click", e => {
+    if (e.target.dataset.action !== "delete") return;
+    const id = e.target.closest("li")?.dataset.id;
+    items = items.filter(i => i.id !== id);
+    save();
+    render();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    items = items.filter(i => !i.done);
+    save();
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
